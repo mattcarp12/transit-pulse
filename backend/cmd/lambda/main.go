@@ -18,9 +18,7 @@ import (
 
 var (
 	transitClient *transit.Client
-	staticStops   map[string]transit.Stop
-	staticTrips   map[string]transit.Trip
-	staticShapes  map[string][]transit.ShapePoint
+	staticData    transit.StaticData
 	s3Client      *s3.Client
 	bucketName    string
 	isLocal       bool
@@ -53,17 +51,15 @@ func init() {
 	defer cancel()
 
 	log.Println("Downloading static GTFS schedule into memory...")
-	staticData, err := transitClient.FetchStaticData(ctx)
+	var err error
+	staticData, err = transitClient.FetchStaticData(ctx)
 	if err != nil {
 		log.Fatalf("Failed to fetch static data: %v", err)
 	}
-	staticShapes = staticData.Shapes
-	staticStops = staticData.Stops
-	staticTrips = staticData.Trips
 
 	if !isLocal {
 		log.Println("Uploading static shapes.json to S3...")
-		shapesBytes, err := json.Marshal(staticShapes)
+		shapesBytes, err := json.Marshal(staticData.Shapes)
 		if err == nil {
 			_, err = s3Client.PutObject(context.Background(), &s3.PutObjectInput{
 				Bucket:      aws.String(bucketName),
@@ -81,7 +77,7 @@ func init() {
 		}
 	}
 
-	log.Printf("Cold start complete. Loaded %d stops, %d trips.", len(staticStops), len(staticTrips))
+	log.Printf("Cold start complete. Loaded %d stops, %d trips.", len(staticData.Stops), len(staticData.Trips))
 }
 
 func HandleRequest(ctx context.Context) error {
@@ -92,7 +88,7 @@ func HandleRequest(ctx context.Context) error {
 		return fmt.Errorf("failed to fetch live data: %v", err)
 	}
 
-	networkState := transit.BuildNetworkState(feed, staticStops, staticTrips)
+	networkState := transit.BuildNetworkState(feed, staticData)
 
 	payloadBytes, err := json.MarshalIndent(networkState, "", " ")
 	if err != nil {

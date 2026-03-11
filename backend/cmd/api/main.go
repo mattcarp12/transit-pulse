@@ -40,6 +40,7 @@ func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/trains", app.trainsHandler)
 	mux.HandleFunc("/shapes", app.shapesHandler)
+	mux.HandleFunc("/stops", app.stopsHandler)
 
 	// 3. Start the server
 	port := ":8080"
@@ -69,7 +70,7 @@ func (app *App) trainsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Build the clean JSON payload
-	networkState := transit.BuildNetworkState(feed, app.staticData.Stops, app.staticData.Trips)
+	networkState := transit.BuildNetworkState(feed, app.staticData)
 
 	// Send it to the client
 	if err := json.NewEncoder(w).Encode(networkState); err != nil {
@@ -89,6 +90,22 @@ func (app *App) shapesHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Send the route shapes to the client
 	if err := json.NewEncoder(w).Encode(app.staticData.Shapes); err != nil {
+		log.Printf("Error encoding JSON: %v", err)
+	}
+}
+
+func (app *App) stopsHandler(w http.ResponseWriter, r *http.Request) {
+	// Add CORS headers so our local React app can hit this endpoint
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Content-Type", "application/json")
+
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Send the stops to the client
+	if err := json.NewEncoder(w).Encode(app.staticData.Stops); err != nil {
 		log.Printf("Error encoding JSON: %v", err)
 	}
 }

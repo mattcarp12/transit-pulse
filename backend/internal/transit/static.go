@@ -30,9 +30,15 @@ type ShapePoint struct {
 	Sequence int
 }
 
+type Shape struct {
+	ID           string
+	Points       []ShapePoint
+	PrimaryRoute Route
+}
+
 type StaticData struct {
 	Stops  map[string]Stop
-	Shapes map[string][]ShapePoint
+	Shapes map[string]Shape
 	Trips  map[string]Trip
 	Routes map[string]Route
 }
@@ -69,7 +75,7 @@ func (c *Client) FetchStaticData(ctx context.Context) (StaticData, error) {
 	}
 
 	stops := make(map[string]Stop)
-	routeShapes := make(map[string][]ShapePoint)
+	shapes := make(map[string]Shape)
 	trips := make(map[string]Trip)
 	routes := make(map[string]Route)
 
@@ -79,7 +85,7 @@ func (c *Client) FetchStaticData(ctx context.Context) (StaticData, error) {
 		case "stops.txt":
 			stops, err = parseStopsCSV(file)
 		case "shapes.txt":
-			routeShapes, err = parseShapesCSV(file)
+			shapes, err = parseShapesCSV(file)
 		case "trips.txt":
 			trips, err = parseTripsCSV(file)
 		case "routes.txt":
@@ -90,7 +96,23 @@ func (c *Client) FetchStaticData(ctx context.Context) (StaticData, error) {
 		}
 	}
 
-	return StaticData{Stops: stops, Shapes: routeShapes, Trips: trips, Routes: routes}, nil
+	// 5. Enrich shapes with their primary route information for easier access later
+	shapePrimaryRoutes := shapesToRoutes(trips, routes)
+	for id, shape := range shapes {
+		if route, ok := shapePrimaryRoutes[id]; ok {
+			shape.PrimaryRoute = route
+		} else {
+			shape.PrimaryRoute = Route{
+				ID:        "UNKNOWN",
+				ShortName: "Unknown",
+				LongName:  "Unknown Route",
+				Color:     "#666666", // neutral gray fallback
+			}
+		}
+		shapes[id] = shape
+	}
+
+	return StaticData{Stops: stops, Shapes: shapes, Trips: trips, Routes: routes}, nil
 }
 
 // parseStopsCSV reads the CSV file and maps the columns to our Stop struct.
@@ -146,7 +168,7 @@ func parseStopsCSV(file *zip.File) (map[string]Stop, error) {
 
 // parseShapesCSV reads the shapes.txt file, extracts the coordinates,
 // and groups them by shape_id in the correct sequential order.
-func parseShapesCSV(file *zip.File) (map[string][]ShapePoint, error) {
+func parseShapesCSV(file *zip.File) (map[string]Shape, error) {
 	// 1. Open the file directly from the zip archive in memory
 	f, err := file.Open()
 	if err != nil {
@@ -174,7 +196,7 @@ func parseShapesCSV(file *zip.File) (map[string][]ShapePoint, error) {
 	seqIdx := headerMap["shape_pt_sequence"]
 
 	// 4. Initialize our map to hold the final grouped shapes
-	shapes := make(map[string][]ShapePoint)
+	shapes := make(map[string]Shape)
 
 	// 5. Read all the remaining rows
 	records, err := csvReader.ReadAll()
@@ -200,19 +222,20 @@ func parseShapesCSV(file *zip.File) (map[string][]ShapePoint, error) {
 
 		// Append this point to the slice for this specific shapeID.
 		// If the shapeID doesn't exist in the map yet, Go handles creating it automatically.
-		shapes[shapeID] = append(shapes[shapeID], point)
+		shapes[shapeID] = Shape{
+			ID:     shapeID,
+			Points: append(shapes[shapeID].Points, point),
+		}
 	}
 
 	// 7. Sort the points for every shape to ensure a smooth line
-	for id, points := range shapes {
+	for id, shape := range shapes {
 		// sort.Slice is a highly optimized sorting algorithm built into Go.
 		// It takes the slice, and a custom "less than" function to compare two items (i and j).
-		sort.Slice(points, func(i, j int) bool {
-			return points[i].Sequence < points[j].Sequence
+		sort.Slice(shape.Points, func(i, j int) bool {
+			return shape.Points[i].Sequence < shape.Points[j].Sequence
 		})
-
-		// Update the map with the newly sorted list
-		shapes[id] = points
+		shapes[id] = shape
 	}
 
 	return shapes, nil
@@ -305,6 +328,7 @@ func parseRoutesCSV(file *zip.File) (map[string]Route, error) {
 		if idx, ok := headerMap["route_color"]; ok && record[idx] != "" {
 			color = record[idx]
 		}
+		color = "#" + color // Prepend # to make it a valid hex color code
 
 		routes[id] = Route{
 			ID:        id,
@@ -315,4 +339,38 @@ func parseRoutesCSV(file *zip.File) (map[string]Route, error) {
 	}
 
 	return routes, nil
+}
+
+// Determine the primary route for each shape by counting how many trips use it.
+// Returns a mapping of shape_id to the most frequently associated Route.
+func shapesToRoutes(trips map[string]Trip, routes map[string]Route) map[string]Route {
+	shapeToRouteCount := make(map[string]map[string]int)
+
+	// Count how many times each route uses each shape
+	for _, trip := range trips {
+		if _, ok := shapeToRouteCount[trip.ShapeID]; !ok {
+			shapeToRouteCount[trip.ShapeID] = make(map[string]int)
+		}
+		shapeToRouteCount[trip.ShapeID][trip.RouteID]++
+	}
+
+	// Pick the most common route for each shape
+	shapePrimaryRoute := make(map[string]Route)
+	for shapeID, routeCounts := range shapeToRouteCount {
+		maxCount := 0
+		primaryRouteID := ""
+
+		for routeID, count := range routeCounts {
+			if count > maxCount {
+				maxCount = count
+				primaryRouteID = routeID
+			}
+		}
+
+		if route, ok := routes[primaryRouteID]; ok {
+			shapePrimaryRoute[shapeID] = route
+		}
+	}
+
+	return shapePrimaryRoute
 }
