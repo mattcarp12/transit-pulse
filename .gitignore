@@ -1,0 +1,30 @@
+# =========================
+# React / Node.js (Frontend)
+# =========================
+node_modules/
+dist/
+dist-ssr/
+*.local
+
+# ALWAYS ignore real environment variables
+.env
+.env.*
+!.env.example
+
+# =========================
+# Go / AWS SAM (Backend)
+# =========================
+# Ignore the compiled Linux binary
+backend/bootstrap
+
+# Ignore the AWS SAM build artifacts
+.aws-sam/
+packaged.yaml
+
+# =========================
+# OS / Editor Junk
+# =========================
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

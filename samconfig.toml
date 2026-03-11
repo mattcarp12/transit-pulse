@@ -1,0 +1,13 @@
+version = 0.1
+
+[default.deploy.parameters]
+stack_name = "transit-pulse"
+resolve_s3 = true
+s3_prefix = "transit-pulse"
+region = "us-west-2"
+capabilities = "CAPABILITY_IAM"
+parameter_overrides = "DataBucketName=\"transit-pulse-data-mrc-2026\""
+image_repositories = []
+
+[default.global.parameters]
+region = "us-west-2"

@@ -1,0 +1,155 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: |
+  Transit Pulse Backend Pipeline Ingests GTFS-RT data and drops it into an S3 bucket.
+
+# Parameters allow us to inject variables when we deploy
+Parameters:
+  DataBucketName:
+    Type: String
+    Description: The globally unique name for your S3 bucket (e.g.,
+      transit-pulse-data-yourname)
+
+Resources:
+  # 1. THE STORAGE: Our S3 Bucket
+  TransitDataBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Ref DataBucketName
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: false
+        BlockPublicPolicy: false
+        IgnorePublicAcls: false
+        RestrictPublicBuckets: false
+      # We enable CORS so your local React app can read the data from the cloud bucket
+      CorsConfiguration:
+        CorsRules:
+          - AllowedHeaders:
+              - '*'
+            AllowedMethods:
+              - GET
+            AllowedOrigins:
+              - '*'
+  
+  TransitDataBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref TransitDataBucket
+      PolicyDocument: 
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: '*'
+            Action: 's3:GetObject'
+            Resource: !Sub "${TransitDataBucket.Arn}/*"
+
+  # 2. THE COMPUTE: Our Go Lambda Function
+  IngestionFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      # SOTA: Go doesn't use the standard 'go1.x' runtime anymore. 
+      # We compile it to a custom Linux binary and run it on Amazon Linux 2023.
+      Runtime: provided.al2023
+      CodeUri: backend/
+      Handler: bootstrap # The compiled binary must be named 'bootstrap'
+      Architectures:
+        - x86_64
+      Timeout: 10 # If the BART API hangs, kill the function after 10 seconds
+      MemorySize: 256 # 256MB is plenty for our 10MB static zip file
+
+      # 3. THE CONFIGURATION: Pass the bucket name to Go as an Environment Variable
+      Environment:
+        Variables:
+          S3_BUCKET_NAME: !Ref TransitDataBucket
+          LOCAL_MODE: 'false'
+
+      # 4. THE SECURITY (IAM): Give this function exactly ONE permission: Write to our specific bucket
+      Policies:
+        - S3WritePolicy:
+            BucketName: !Ref TransitDataBucket
+
+      # 5. THE TRIGGER: Wake this function up every 1 minute
+      Events:
+        PulseTimer:
+          Type: Schedule
+          Properties:
+            Schedule: rate(1 minute)
+
+  # 3. FRONTEND INFRASTRCTURE 
+  FrontendBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "${DataBucketName}-frontend"
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  CloudFrontOAC:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig: 
+        Name: !Sub "OAC-${AWS::StackName}"
+        SigningBehavior: always
+        SigningProtocol: sigv4
+        OriginAccessControlOriginType: s3
+  
+  FrontendDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig: 
+        Enabled: true
+        DefaultRootObject: index.html
+        HttpVersion: http2
+        CustomErrorResponses:
+          - ErrorCode: 403
+            ResponseCode: 200
+            ResponsePagePath: /index.html
+          - ErrorCode: 404
+            ResponseCode: 200
+            ResponsePagePath: /index.html
+        Origins:
+          - Id: FrontendS3Origin
+            DomainName: !GetAtt FrontendBucket.RegionalDomainName
+            S3OriginConfig:
+              OriginAccessIdentity: "" # Must be blank in modern AWS when using OAC
+            OriginAccessControlId: !GetAtt CloudFrontOAC.Id
+        DefaultCacheBehavior:
+          TargetOriginId: FrontendS3Origin
+          ViewerProtocolPolicy: redirect-to-https # Force secure connections
+          AllowedMethods: [GET, HEAD, OPTIONS]
+          CachedMethods: [GET, HEAD, OPTIONS]
+          ForwardedValues:
+            QueryString: false
+            Cookies:
+              Forward: none
+  FrontendBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref FrontendBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: cloudfront.amazonaws.com
+            Action: s3:GetObject
+            Resource: !Sub "${FrontendBucket.Arn}/*"
+            Condition:
+              StringEquals:
+                # Strictly ensure ONLY our specific CloudFront distribution can access this bucket
+                AWS:SourceArn: !Sub "arn:aws:cloudfront::${AWS::AccountId}:distribution/${FrontendDistribution}"
+
+
+# Outputs print helpful information to our terminal after a successful deployment
+Outputs:
+  BucketName:
+    Description: Transit Data S3 Bucket
+    Value: !Ref TransitDataBucket
+  FrontendWebsiteURL:
+    Description: "Your Live React App URL"
+    Value: !Sub "https://${FrontendDistribution.DomainName}"
+  CloudFrontDistributionId:
+    Description: "Needed for GitHub Actions Invalidation"
+    Value: !Ref FrontendDistribution
