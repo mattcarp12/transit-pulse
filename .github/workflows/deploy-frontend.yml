@@ -39,6 +39,7 @@ jobs:
         env:
           VITE_LIVE_DATA_URL: ${{ secrets.VITE_LIVE_DATA_URL }}
           VITE_SHAPES_URL: ${{ secrets.VITE_SHAPES_URL }}
+          VITE_STOPS_URL: ${{ secrets.VITE_STOPS_URL }}
 
       - name: ☁️ Configure AWS Credentials via OIDC
         uses: aws-actions/configure-aws-credentials@v4
