@@ -1,0 +1,53 @@
+name: Deploy Frontend to AWS
+
+on:
+  push:
+    branches:
+      - main # Only run this when code is pushed to the main branch
+    paths:
+      - 'frontend/**' # Only trigger if files inside the frontend folder actually changed
+
+# CRITICAL: This allows GitHub to request the temporary OIDC token from AWS
+permissions:
+  id-token: write 
+  contents: read  
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./frontend # Tell GitHub to run all commands inside the frontend folder
+
+    steps:
+      - name: ⬇️ Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: 🟢 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: 📦 Install Dependencies
+        run: npm install
+
+      - name: 🏗️ Build React App
+        run: npm run build
+        # We inject your API URLs here so Vite can bake them into the production code
+        env:
+          VITE_LIVE_DATA_URL: ${{ secrets.VITE_LIVE_DATA_URL }}
+          VITE_SHAPES_URL: ${{ secrets.VITE_SHAPES_URL }}
+
+      - name: ☁️ Configure AWS Credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: us-west-2
+
+      - name: 🚀 Sync Files to S3 Frontend Bucket
+        # The --delete flag removes old files from S3 that no longer exist in your new build
+        run: aws s3 sync dist/ s3://${{ secrets.FRONTEND_BUCKET_NAME }} --delete
+
+      - name: 🔄 Invalidate CloudFront Cache
+        # Forces the CDN edge servers to drop the old website and grab the new one immediately
+        run: aws cloudfront create-invalidation --distribution-id ${{ secrets.CLOUDFRONT_DIST_ID }} --paths "/*"
