@@ -6,6 +6,7 @@ on:
       - main # Only run this when code is pushed to the main branch
     paths:
       - 'frontend/**' # Only trigger if files inside the frontend folder actually changed
+      - '.github/workflows/deploy-frontend.yml' # Also trigger if we change this workflow file itself
 
 # CRITICAL: This allows GitHub to request the temporary OIDC token from AWS
 permissions:
