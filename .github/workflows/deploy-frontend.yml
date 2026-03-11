@@ -46,7 +46,7 @@ jobs:
 
       - name: 🚀 Sync Files to S3 Frontend Bucket
         # The --delete flag removes old files from S3 that no longer exist in your new build
-        run: aws s3 sync dist/ s3://${{ secrets.FRONTEND_BUCKET_NAME }} --delete
+        run: aws s3 sync dist/ ${{ secrets.FRONTEND_BUCKET_NAME }} --delete
 
       - name: 🔄 Invalidate CloudFront Cache
         # Forces the CDN edge servers to drop the old website and grab the new one immediately
