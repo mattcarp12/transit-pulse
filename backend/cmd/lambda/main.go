@@ -62,12 +62,12 @@ func init() {
 	staticTrips = staticData.Trips
 
 	if !isLocal {
-		log.Println("Uploading static route_shapes.json to S3...")
+		log.Println("Uploading static shapes.json to S3...")
 		shapesBytes, err := json.Marshal(staticShapes)
 		if err == nil {
 			_, err = s3Client.PutObject(context.Background(), &s3.PutObjectInput{
 				Bucket:      aws.String(bucketName),
-				Key:         aws.String("route_shapes.json"),
+				Key:         aws.String("shapes.json"),
 				Body:        bytes.NewReader(shapesBytes),
 				ContentType: aws.String("application/json"),
 				//Cache for 24 hours
@@ -76,7 +76,7 @@ func init() {
 			if err != nil {
 				log.Printf("Warning: Failed to upload route shapes: %v", err)
 			} else {
-				log.Println("Successfully uploaded route_shapes.json")
+				log.Println("Successfully uploaded shapes.json")
 			}
 		}
 	}
