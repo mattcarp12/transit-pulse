@@ -1,0 +1,53 @@
+name: Deploy Backend to AWS
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      # Only trigger if the Go code, the AWS infrastructure, or this workflow file changes
+      - 'backend/**'
+      - 'template.yaml'
+      - 'samconfig.toml'
+      - '.github/workflows/deploy-backend.yml'
+  workflow_dispatch:
+
+# CRITICAL: This allows GitHub to request the temporary OIDC token from AWS
+permissions:
+  id-token: write 
+  contents: read  
+
+jobs:
+  deploy-infrastructure:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: ⬇️ Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: 🟢 Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22' # Uses the latest stable Go version
+
+      - name: ☁️ Configure AWS Credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }} 
+          aws-region: us-west-2
+
+      - name: 🛠️ Setup AWS SAM CLI
+        uses: aws-actions/setup-sam@v2
+        with:
+          use-installer: true
+
+      - name: 🏗️ Build Go Binary
+        # This replicates your exact local build command
+        run: |
+          cd backend
+          GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o bootstrap ./cmd/lambda
+
+      - name: 🚀 Deploy via AWS SAM
+        # --no-confirm-changeset prevents the pipeline from hanging while waiting for a "Y/N" prompt
+        # --no-fail-on-empty-changeset prevents the pipeline from failing if you only updated Go code and not the AWS YAML
+        run: sam deploy --no-confirm-changeset --no-fail-on-empty-changeset
