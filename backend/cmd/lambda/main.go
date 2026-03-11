@@ -75,6 +75,24 @@ func init() {
 				log.Println("Successfully uploaded shapes.json")
 			}
 		}
+
+		log.Println("Uploading static stops.json to S3...")
+		stopsBytes, err := json.Marshal(staticData.Stops)
+		if err == nil {
+			_, err = s3Client.PutObject(context.Background(), &s3.PutObjectInput{
+				Bucket:      aws.String(bucketName),
+				Key:         aws.String("stops.json"),
+				Body:        bytes.NewReader(stopsBytes),
+				ContentType: aws.String("application/json"),
+				//Cache for 24 hours
+				CacheControl: aws.String("max-age=86400"),
+			})
+			if err != nil {
+				log.Printf("Warning: Failed to upload stops data: %v", err)
+			} else {
+				log.Println("Successfully uploaded stops.json")
+			}
+		}
 	}
 
 	log.Printf("Cold start complete. Loaded %d stops, %d trips.", len(staticData.Stops), len(staticData.Trips))
